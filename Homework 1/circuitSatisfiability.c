@@ -20,20 +20,41 @@ int main (int argc, char *argv[]) {
 	int id = 0;           /* process id */
 	int count = 0;        /* number of solutions */
 
+	int comm_sz;
+
+	MPI_Init(NULL, NULL);
+	MPI_Comm_size(MPI_COMM_WORLD, &comm_sz);
+	MPI_Comm_rank(MPI_COMM_WORLD, &id);
+
+	// calculate total time
 	double startTime = 0.0, totalTime = 0.0;
 	startTime = MPI_Wtime();
 
-	for (i = 0; i <= UINT_MAX; i++) {
+	// set the interval of each rank
+	long n = ((long)UINT_MAX + 1) / comm_sz;
+	long local_start = id * n;
+	long local_end = local_start + n;
+
+	for (i = local_start; i < local_end; i++) {
 		count += checkCircuit (id, i);
 	}
+	printf("Process %d found %d solutions", id, count);
 
+	if(id != 0){
+		MPI_Send(&count, sizeof count, MPI_INT, 0, 0, MPI_COMM_WORLD);
+	}else{
+		int sum = count;
+		for(int q = 1; q < comm_sz; ++q){
+			MPI_Recv(&count, sizeof count, MPI_INT, q, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			sum += count;
+		}	
+		fflush (stdout);
+		printf("\nA total of %d solutions were found.\n\n", sum);
+	}
 	totalTime = MPI_Wtime() - startTime;
 	printf("Process %d finished in time %f secs.\n", id, totalTime);
 
-
-	fflush (stdout);
-
-	printf("\nA total of %d solutions were found.\n\n", count);
+	MPI_Finalize();
 	return 0;
 }
 
@@ -85,12 +106,10 @@ int checkCircuit (int id, long bits) {
 			  && (v[28] || v[29]) && (v[29] || !v[30])
 			  && (v[30] || v[31]) ) )
 	{
-		/*
 		   printf ("%d) %d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d \n", id,
 		   v[31],v[30],v[29],v[28],v[27],v[26],v[25],v[24],v[23],v[22],
 		   v[21],v[20],v[19],v[18],v[17],v[16],v[15],v[14],v[13],v[12],
 		   v[11],v[10],v[9],v[8],v[7],v[6],v[5],v[4],v[3],v[2],v[1],v[0]);
-		 */
 		fflush (stdout);
 		return 1;
 	} else {
