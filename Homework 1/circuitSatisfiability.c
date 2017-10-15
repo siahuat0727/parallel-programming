@@ -41,11 +41,11 @@ int main (int argc, char *argv[]) {
 	printf("Process %d found %d solutions", id, count);
 
 	if(id != 0){
-		MPI_Send(&count, sizeof count, MPI_INT, 0, 0, MPI_COMM_WORLD);
+		MPI_Send(&count, 1, MPI_INT, 0, 0, MPI_COMM_WORLD);
 	}else{
 		int sum = count;
 		for(int q = 1; q < comm_sz; ++q){
-			MPI_Recv(&count, sizeof count, MPI_INT, q, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			MPI_Recv(&count, 1, MPI_INT, q, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 			sum += count;
 		}	
 		fflush (stdout);
