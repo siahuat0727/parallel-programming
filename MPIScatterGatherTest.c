@@ -34,6 +34,16 @@ int main (int argc, char *argv[]) {
 	arrayToString(receive_arr, local_n, str);
 	printf("I'm %d, I received: %s\n", id, str);
 
+	for(int i = 0; i < local_n; ++i)
+		receive_arr[i] *= 2;
+
+	MPI_Gather(receive_arr, local_n, MPI_INT, arr, local_n, MPI_INT, 0, MPI_COMM_WORLD);
+	
+	if(id == 0){
+		arrayToString(arr, ARR_SIZE, str);
+		printf("I'm %d, my arr is now: %s\n", id, str);
+	}
+
 	MPI_Finalize();
 	return 0;
 }
