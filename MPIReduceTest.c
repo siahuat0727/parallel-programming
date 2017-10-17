@@ -1,6 +1,3 @@
-/*
- * Work only for comm_sz = 2^n, n = 0, 1, 2, ...
- */
 #include <stdio.h>
 #include <mpi.h>
 

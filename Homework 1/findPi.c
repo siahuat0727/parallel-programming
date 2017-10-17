@@ -1,16 +1,9 @@
-/* circuitSatifiability.c solves the Circuit Satisfiability
- *  Problem using a brute-force sequential solution.
- *
- *   The particular circuit being tested is "wired" into the
- *   logic of function 'checkCircuit'. All combinations of
- *   inputs that satisfy the circuit are printed.
- *
- *   16-bit version by Michael J. Quinn, Sept 2002.
- *   Extended to 32 bits by Joel C. Adams, Sept 2013.
+/*   findPi.c estimate the value of pi
+ *   Using "Monte Carlo" method 
  */
 
-#include <stdio.h>     // printf()
-#include <limits.h>    // UINT_MAX
+#include <stdio.h>
+#include <limits.h>
 #include <mpi.h>
 #include <stdlib.h>
 #include <time.h>
@@ -30,7 +23,7 @@ void testRandDouble(){
 
 int main (int argc, char *argv[]) {
 	int id;           /* process id */
-	int comm_sz;
+	int comm_sz;      /* total number of processes */
 
 	MPI_Init(NULL, NULL);
 	MPI_Comm_rank(MPI_COMM_WORLD, &id);
@@ -39,22 +32,28 @@ int main (int argc, char *argv[]) {
 	ll total_tosses = 0;
 	ll local_total = 0;
 	ll num_in_circle = 0;
+
+	// process 0 read the total number of tosses
 	if(id == 0)
 		scanf("%lld", &total_tosses);
 
+	// broadcast to other processes
 	MPI_Bcast(&total_tosses, 1, MPI_LONG_LONG, 0, MPI_COMM_WORLD);
 
+	// count the local total number of tosses of each process
 	if(id == 0)
 		local_total = total_tosses - (comm_sz - 1)*(total_tosses / comm_sz); 
 	else
 		local_total = total_tosses / comm_sz;	
 
+	// set different random seed for each process
 	srand(time(NULL) + id);
 
 	// calculate total time
 	double startTime = 0.0, totalTime = 0.0;
 	startTime = MPI_Wtime();
 
+	// Monte Carlo method
 	while(local_total--){
 		double x = randDouble();
 		double y = randDouble();
@@ -62,7 +61,8 @@ int main (int argc, char *argv[]) {
 			num_in_circle++;
 	}
 
-	for(int tmp = comm_sz, next_tmp; tmp > 1; tmp = next_tmp){
+	// Tree-structed communication, process 0 collect the global sum
+	for(int tmp = comm_sz, next_tmp; tmp > 1; tmp = next_tmp){ // tmp: the total number of processes which haven't passed its result
 		next_tmp = (tmp+1) >> 1;
 		if(id >= tmp)
 			continue;
@@ -77,11 +77,14 @@ int main (int argc, char *argv[]) {
 		}
 	}
 
+	// calculate total time
 	totalTime = MPI_Wtime() - startTime;
 
+	// process 0 print the result
 	if(id == 0){
-		printf("estimate %f\n", 4*num_in_circle / (double)total_tosses);
-		printf("Process %d finished in time %f secs.\n", id, totalTime);
+		double pi_estimate = 4*num_in_circle / (double)total_tosses;
+		printf("After %lld tosses, the approximate value of pi is %f\n", total_tosses, pi_estimate);
+		printf("Process finished in time %f secs.\n", totalTime);
 	}
 
 	MPI_Finalize();

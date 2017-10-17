@@ -20,14 +20,16 @@ int main (int argc, char *argv[]) {
 
 		if(id & sender_bit){ // the process which sender_bit = 1 is the sender for this loop 
 			int receiver = id^sender_bit;
+			printf("I'm %d, i want to send to %d\n", id, receiver);
 			MPI_Send(&count, 1, MPI_INT, receiver, 0, MPI_COMM_WORLD);
 		}else{
 			int sender = id|sender_bit;
+			printf("I'm %d, i want to receive from %d\n", id, sender);
 			MPI_Recv(&count, 1, MPI_INT, sender,  0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 		}
 
-		sender_bit <<= 1;
 		to_skip |= sender_bit;
+		sender_bit <<= 1;
 	}
 	MPI_Finalize();
 	return 0;
