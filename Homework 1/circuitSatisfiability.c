@@ -15,7 +15,8 @@
 
 int checkCircuit (int, long);
 
-int main (int argc, char *argv[]) {
+int main (int argc, char *argv[]) 
+{
 	long i = 0;           /* loop variable (64 bits) */
 	int id = 0;           /* process id */
 	int comm_sz = 0;      /* total number of processes */
@@ -36,7 +37,8 @@ int main (int argc, char *argv[]) {
 	long local_end = local_start + n;
 
 	// start counting
-	for (i = local_start; i < local_end; i++) {
+	for (i = local_start; i < local_end; i++) 
+	{
 		count += checkCircuit (id, i);
 	}
 
@@ -44,14 +46,18 @@ int main (int argc, char *argv[]) {
 	int sender_bit = 1;
 
  	// Tree-structed communication, work only for comm_sz = 2^n, where n = 0, 1, 2, 3, ...
-	while(sender_bit != comm_sz){
+	while(sender_bit != comm_sz)
+	{
 		if(id & to_skip) // true if the process has already sent sth
 			break;
 
-		if(id & sender_bit){ // the process which sender_bit = 1 is the sender for this loop 
+		if(id & sender_bit)
+		{ // the process which sender_bit = 1 is the sender for this loop 
 			int receiver = id^sender_bit;
 			MPI_Send(&count, 1, MPI_INT, receiver, 0, MPI_COMM_WORLD);
-		}else{ // receiver
+		}
+		else
+		{ // receiver
 			int receive_value;
 			int sender = id|sender_bit;
 			MPI_Recv(&receive_value, 1, MPI_INT, sender,  0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -62,7 +68,8 @@ int main (int argc, char *argv[]) {
 		sender_bit <<= 1;
 	}
 
-	if(id == 0){
+	if(id == 0)
+	{
 		printf("%2d core(s):\n", comm_sz);
 		printf("A total of %d solutions were found.\n", count);
 		totalTime = MPI_Wtime() - startTime;
@@ -94,7 +101,8 @@ int main (int argc, char *argv[]) {
 
 #define SIZE 32
 
-int checkCircuit (int id, long bits) {
+int checkCircuit (int id, long bits) 
+{
 	int v[SIZE];        /* Each element is a bit of bits */
 	int i;
 
@@ -129,7 +137,9 @@ int checkCircuit (int id, long bits) {
 		 */
 		fflush (stdout);
 		return 1;
-	} else {
+	}
+   	else
+   	{
 		return 0;
 	}
 }
