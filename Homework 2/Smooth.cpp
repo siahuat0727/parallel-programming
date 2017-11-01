@@ -10,7 +10,7 @@
 using namespace std;
 
 //定義平滑運算的次數
-#define NSmooth 1000
+#define NSmooth 100
 
 /*********************************************************/
 /*變數宣告：                                             */
@@ -21,9 +21,10 @@ using namespace std;
 /*********************************************************/
 BMPHEADER bmpHeader;                        
 BMPINFO bmpInfo;
-RGBTRIPLE **BMPReadData = NULL;
-RGBTRIPLE **BMPExpandSaveData = NULL;
-RGBTRIPLE **BMPExpandData = NULL;                                                   
+RGBTRIPLE **BMPSaveData = NULL;                                               
+RGBTRIPLE **BMPData = NULL;                                                   
+RGBTRIPLE **BMPPartialSaveData = NULL;                                                   
+RGBTRIPLE **BMPPartialData = NULL;                                                   
 
 /*********************************************************/
 /*函數宣告：                                             */
@@ -34,43 +35,75 @@ RGBTRIPLE **BMPExpandData = NULL;
 /*********************************************************/
 int readBMP( char *fileName);        //read file
 int saveBMP( char *fileName);        //save file
-void expandBMP(RGBTRIPLE *a, RGBTRIPLE *b);  // expand first raw to last raw and last raw to first raw
+int saveSubBMP( char *fileName);        //save file
 void swap(RGBTRIPLE *a, RGBTRIPLE *b);
 RGBTRIPLE **alloc_memory( int Y, int X );        //allocate memory
 
 int main(int argc,char *argv[])
 {
-/*********************************************************/
-/*變數宣告：                                             */
-/*  *infileName  ： 讀取檔名                             */
-/*  *outfileName ： 寫入檔名                             */
-/*  startwtime   ： 記錄開始時間                         */
-/*  endwtime     ： 記錄結束時間                         */
-/*********************************************************/
+    /*********************************************************/
+    /*變數宣告：                                             */
+    /*  *infileName  ： 讀取檔名                             */
+    /*  *outfileName ： 寫入檔名                             */
+    /*  startwtime   ： 記錄開始時間                         */
+    /*  endwtime     ： 記錄結束時間                         */
+    /*********************************************************/
     char *infileName = "input.bmp";
     char *outfileName = "output2.bmp";
-    double startwtime = 0.0, endwtime=0;
+    double startwtime = 0.0, endwtime = 0;
 
     MPI_Init(&argc,&argv);
-    
+
     //記錄開始時間
     startwtime = MPI_Wtime();
 
-    //讀取檔案
-        if ( readBMP( infileName) )
-                cout << "Read file successfully!!" << endl;
-        else 
-                cout << "Read file fails!!" << endl;
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+	MPI_Datatype BMP_RAW;
+	MPI_Type_contiguous(sizeof(RGBTRIPLE)*bmpInfo.biWidth, MPI_CHAR, &BMP_RAW);
+	MPI_Type_commit(&BMP_RAW);
+
+	if ( rank == 0 && readBMP( infileName) )
+		cout << "Read file successfully!!" << endl;
+	else 
+		cout << "Read file fails!!" << endl;
+
+	MPI_Bcast(&bmpInfo.biHeight, 1, MPI_INT, 0, MPI_COMM_WORLD);
+	MPI_Bcast(&bmpInfo.biWidth, 1, MPI_INT, 0, MPI_COMM_WORLD);
+	cout << rank << " after bcast" << endl;
+
+    int *send_counts = (int*)malloc(size * sizeof(int));
+    int *displaces = (int*)malloc(size * sizeof(int));
+    const int default_send_count = bmpInfo.biHeight / size;
+    int rem = bmpInfo.biHeight % size;
+    int sum = 0;
+    for(int i = 0; i < size; ++i){
+        send_counts[i] = default_send_count;
+        if(rem-- > 0)
+            ++send_counts[i];
+        displaces[i] = sum;
+        sum += send_counts[i];
+    }
+	cout << rank << " after for" << endl;
+
+	BMPPartialSaveData = alloc_memory(send_counts[rank]+2 , bmpInfo.biWidth);
+
+//讀取檔案
+	
+	MPI_Scatterv(rank==0 ? (char *)BMPSaveData[0] : NULL, send_counts, displaces, BMP_RAW, (char*)BMPPartialSaveData[1], send_counts[rank], BMP_RAW, 0, MPI_COMM_WORLD);
+	cout << rank << " after scatter" << endl;
 
     //動態分配記憶體給暫存空間
-        BMPData = alloc_memory( bmpInfo.biHeight, bmpInfo.biWidth);
+	BMPPartialData = alloc_memory(send_counts[rank]+2 , bmpInfo.biWidth);
 
-        //進行多次的平滑運算
+    //進行多次的平滑運算
     for(int count = 0; count < NSmooth ; count ++){
         //把像素資料與暫存指標做交換
-        swap(BMPSaveData,BMPData);
+        swap(BMPPartialSaveData,BMPPartialData);
         //進行平滑運算
-        for(int i = 0; i<bmpInfo.biHeight ; i++)
+        for(int i = 1; i<=send_counts[rank] ; i++)
             for(int j =0; j<bmpInfo.biWidth ; j++){
                 /*********************************************************/
                 /*設定上下左右像素的位置                                 */
@@ -82,27 +115,45 @@ int main(int argc,char *argv[])
                 /*********************************************************/
                 /*與上下左右像素做平均，並四捨五入                       */
                 /*********************************************************/
-                BMPSaveData[i][j].rgbBlue =  (double) (BMPData[i][j].rgbBlue+BMPData[Top][j].rgbBlue+BMPData[Down][j].rgbBlue+BMPData[i][Left].rgbBlue+BMPData[i][Right].rgbBlue)/5+0.5;
-                BMPSaveData[i][j].rgbGreen =  (double) (BMPData[i][j].rgbGreen+BMPData[Top][j].rgbGreen+BMPData[Down][j].rgbGreen+BMPData[i][Left].rgbGreen+BMPData[i][Right].rgbGreen)/5+0.5;
-                BMPSaveData[i][j].rgbRed =  (double) (BMPData[i][j].rgbRed+BMPData[Top][j].rgbRed+BMPData[Down][j].rgbRed+BMPData[i][Left].rgbRed+BMPData[i][Right].rgbRed)/5+0.5;
+                BMPPartialSaveData[i][j].rgbBlue =  (double) (BMPPartialData[i][j].rgbBlue+BMPPartialData[Top][j].rgbBlue+BMPPartialData[Down][j].rgbBlue+BMPPartialData[i][Left].rgbBlue+BMPPartialData[i][Right].rgbBlue)/5+0.5;
+                BMPPartialSaveData[i][j].rgbGreen =  (double) (BMPPartialData[i][j].rgbGreen+BMPPartialData[Top][j].rgbGreen+BMPPartialData[Down][j].rgbGreen+BMPPartialData[i][Left].rgbGreen+BMPPartialData[i][Right].rgbGreen)/5+0.5;
+                BMPPartialSaveData[i][j].rgbRed =  (double) (BMPPartialData[i][j].rgbRed+BMPPartialData[Top][j].rgbRed+BMPPartialData[Down][j].rgbRed+BMPPartialData[i][Left].rgbRed+BMPPartialData[i][Right].rgbRed)/5+0.5;
             }
     }
- 
-    //寫入檔案
-        if ( saveBMP( outfileName ) )
-                cout << "Save file successfully!!" << endl;
-        else
-                cout << "Save file fails!!" << endl;
-    
-    //得到結束時間，並印出執行時間
-        endwtime = MPI_Wtime();
-        cout << "The execution time = "<< endwtime-startwtime <<endl ;
+
+	MPI_Gatherv((char*)BMPPartialSaveData[1], send_counts[rank], BMP_RAW, rank==0 ? (char*)BMPSaveData[0] : NULL, send_counts, displaces, BMP_RAW, 0, MPI_COMM_WORLD);
+	cout << rank << " after gather" << endl;
+
+	if ( rank == 0 && saveBMP( "output_try.bmp" ) )
+		cout << "Save file successfully!!" << endl;
+	else
+		cout << "Save file fails!!" << endl;
+
+
+	//得到結束時間，並印出執行時間
 
     free(BMPData);
     free(BMPSaveData);
     MPI_Finalize();
 
-        return 0;
+	return 0;
+
+//
+//    //寫入檔案
+//    if ( saveSubBMP( outfileName ) )
+//        cout << "Save file successfully!!" << endl;
+//    else
+//        cout << "Save file fails!!" << endl;
+//
+//    //得到結束時間，並印出執行時間
+//    endwtime = MPI_Wtime();
+//    cout << "The execution time = "<< endwtime-startwtime <<endl ;
+//
+//    free(BMPData);
+//    free(BMPSaveData);
+//    MPI_Finalize();
+//
+//    return 0;
 }
 
 /*********************************************************/
@@ -111,49 +162,49 @@ int main(int argc,char *argv[])
 int readBMP(char *fileName)
 {
     //建立輸入檔案物件  
-        ifstream bmpFile( fileName, ios::in | ios::binary );
- 
-        //檔案無法開啟
-        if ( !bmpFile ){
-                cout << "It can't open file!!" << endl;
-                return 0;
-        }
- 
-        //讀取BMP圖檔的標頭資料
-        bmpFile.read( ( char* ) &bmpHeader, sizeof( BMPHEADER ) );
- 
-        //判決是否為BMP圖檔
-        if( bmpHeader.bfType != 0x4d42 ){
-                cout << "This file is not .BMP!!" << endl ;
-                return 0;
-        }
- 
-        //讀取BMP的資訊
-        bmpFile.read( ( char* ) &bmpInfo, sizeof( BMPINFO ) );
-        
-        //判斷位元深度是否為24 bits
-        if ( bmpInfo.biBitCount != 24 ){
-                cout << "The file is not 24 bits!!" << endl;
-                return 0;
-        }
+    ifstream bmpFile( fileName, ios::in | ios::binary );
 
-        //修正圖片的寬度為4的倍數
-        while( bmpInfo.biWidth % 4 != 0 )
-            bmpInfo.biWidth++;
+    //檔案無法開啟
+    if ( !bmpFile ){
+        cout << "It can't open file!!" << endl;
+        return 0;
+    }
 
-        //動態分配記憶體
-        BMPSaveData = alloc_memory( bmpInfo.biHeight, bmpInfo.biWidth);
-        
-        //讀取像素資料
-        //for(int i = 0; i < bmpInfo.biHeight; i++)
-        //  bmpFile.read( (char* )BMPSaveData[i], bmpInfo.biWidth*sizeof(RGBTRIPLE));
+    //讀取BMP圖檔的標頭資料
+    bmpFile.read( ( char* ) &bmpHeader, sizeof( BMPHEADER ) );
+
+    //判決是否為BMP圖檔
+    if( bmpHeader.bfType != 0x4d42 ){
+        cout << "This file is not .BMP!!" << endl ;
+        return 0;
+    }
+
+    //讀取BMP的資訊
+    bmpFile.read( ( char* ) &bmpInfo, sizeof( BMPINFO ) );
+
+    //判斷位元深度是否為24 bits
+    if ( bmpInfo.biBitCount != 24 ){
+        cout << "The file is not 24 bits!!" << endl;
+        return 0;
+    }
+
+    //修正圖片的寬度為4的倍數
+    while( bmpInfo.biWidth % 4 != 0 )
+        bmpInfo.biWidth++;
+
+    //動態分配記憶體
+    BMPSaveData = alloc_memory( bmpInfo.biHeight, bmpInfo.biWidth);
+
+    //讀取像素資料
+    //for(int i = 0; i < bmpInfo.biHeight; i++)
+    //  bmpFile.read( (char* )BMPSaveData[i], bmpInfo.biWidth*sizeof(RGBTRIPLE));
     bmpFile.read( (char* )BMPSaveData[0], bmpInfo.biWidth*sizeof(RGBTRIPLE)*bmpInfo.biHeight);
-    
-        //關閉檔案
-        bmpFile.close();
- 
-        return 1;
- 
+
+    //關閉檔案
+    bmpFile.close();
+
+    return 1;
+
 }
 /*********************************************************/
 /* 儲存圖檔                                              */
@@ -161,37 +212,79 @@ int readBMP(char *fileName)
 int saveBMP( char *fileName)
 {
     //判決是否為BMP圖檔
-        if( bmpHeader.bfType != 0x4d42 ){
-                cout << "This file is not .BMP!!" << endl ;
-                return 0;
-        }
-        
+    if( bmpHeader.bfType != 0x4d42 ){
+        cout << "This file is not .BMP!!" << endl ;
+        return 0;
+    }
+
     //建立輸出檔案物件
-        ofstream newFile( fileName,  ios:: out | ios::binary );
- 
-        //檔案無法建立
-        if ( !newFile ){
-                cout << "The File can't create!!" << endl;
-                return 0;
-        }
-    
-        //寫入BMP圖檔的標頭資料
-        newFile.write( ( char* )&bmpHeader, sizeof( BMPHEADER ) );
+    ofstream newFile( fileName,  ios:: out | ios::binary );
+
+    //檔案無法建立
+    if ( !newFile ){
+        cout << "The File can't create!!" << endl;
+        return 0;
+    }
+
+    //寫入BMP圖檔的標頭資料
+    newFile.write( ( char* )&bmpHeader, sizeof( BMPHEADER ) );
 
     //寫入BMP的資訊
-        newFile.write( ( char* )&bmpInfo, sizeof( BMPINFO ) );
+    newFile.write( ( char* )&bmpInfo, sizeof( BMPINFO ) );
 
-        //寫入像素資料
-        //for( int i = 0; i < bmpInfo.biHeight; i++ )
-        //        newFile.write( ( char* )BMPSaveData[i], bmpInfo.biWidth*sizeof(RGBTRIPLE) );
-        newFile.write( ( char* )BMPSaveData[0], bmpInfo.biWidth*sizeof(RGBTRIPLE)*bmpInfo.biHeight );
+    //寫入像素資料
+    //for( int i = 0; i < bmpInfo.biHeight; i++ )
+    //        newFile.write( ( char* )BMPSaveData[i], bmpInfo.biWidth*sizeof(RGBTRIPLE) );
+    newFile.write( ( char* )BMPSaveData[0], bmpInfo.biWidth*sizeof(RGBTRIPLE)*bmpInfo.biHeight );
 
-        //寫入檔案
-        newFile.close();
- 
-        return 1;
- 
+    //寫入檔案
+    newFile.close();
+
+    return 1;
+
 }
+
+int saveSubBMP( char *fileName)
+{
+    //判決是否為BMP圖檔
+    if( bmpHeader.bfType != 0x4d42 ){
+        cout << "This file is not .BMP!!" << endl ;
+        return 0;
+    }
+
+    //建立輸出檔案物件
+    ofstream newFile( fileName,  ios:: out | ios::binary );
+
+    //檔案無法建立
+    if ( !newFile ){
+        cout << "The File can't create!!" << endl;
+        return 0;
+    }
+
+    //寫入BMP圖檔的標頭資料
+    newFile.write( ( char* )&bmpHeader, sizeof( BMPHEADER ) );
+
+    int height = bmpInfo.biHeight /= 2;
+    //寫入BMP的資訊
+    newFile.write( ( char* )&bmpInfo, sizeof( BMPINFO ) );
+
+    //寫入像素資料
+    //for( int i = 0; i < bmpInfo.biHeight; i++ )
+    //        newFile.write( ( char* )BMPSaveData[i], bmpInfo.biWidth*sizeof(RGBTRIPLE) );
+    newFile.write( ( char* )BMPPartialSaveData[0], bmpInfo.biWidth*sizeof(RGBTRIPLE)*height );
+
+    //寫入檔案
+    newFile.close();
+
+    return 1;
+
+}
+
+
+/*********************************************************/
+/* 分配記憶體：回傳為Y*X的矩陣                           */
+/*********************************************************/
+RGBTRIPLE **alloc_memory(int Y, int X );
 
 
 /*********************************************************/
@@ -200,18 +293,18 @@ int saveBMP( char *fileName)
 RGBTRIPLE **alloc_memory(int Y, int X )
 {        
     //建立長度為Y的指標陣列
-        RGBTRIPLE **temp = new RGBTRIPLE *[ Y ];
+    RGBTRIPLE **temp = new RGBTRIPLE *[ Y ];
     RGBTRIPLE *temp2 = new RGBTRIPLE [ Y * X ];
-        memset( temp, 0, sizeof( RGBTRIPLE ) * Y);
-        memset( temp2, 0, sizeof( RGBTRIPLE ) * Y * X );
+    memset( temp, 0, sizeof( RGBTRIPLE ) * Y);
+    memset( temp2, 0, sizeof( RGBTRIPLE ) * Y * X );
 
     //對每個指標陣列裡的指標宣告一個長度為X的陣列 
-        for( int i = 0; i < Y; i++){
-                temp[ i ] = &temp2[i*X];
-        }
- 
-        return temp;
- 
+    for( int i = 0; i < Y; i++){
+        temp[ i ] = &temp2[i*X];
+    }
+
+    return temp;
+
 }
 /*********************************************************/
 /* 交換二個指標                                          */
@@ -224,17 +317,4 @@ void swap(RGBTRIPLE *a, RGBTRIPLE *b)
     b = temp;
 }
 
-void expandBMP()
-{
-    BMPExpandData = alloc_memory( bmpInfo.biHeight + 2, bmpInfo.biWidth);
-    memcpy(BMPExpandData[1], BMPReadData[0], sizeof( RGBTRIPLE ) * bmpInfo.biHeight * bmpInfo.biWidth);
-    expand_raws(BMPExpandData, BMPReadData);
-}
 
-void expand_raws(RGBTRIPLE dest[][bmpInfo.biWidth], RGBTRIPLE src[][bmpInfo.biWidth])
-{
-    memcpy(dest[0], src[bmpInfo.biHeight-1], bmpInfo.biWidth * sizeof(RGBTRIPLE)); // expand first raw
-    memcpy(dest[bmpInfo.biHeight+1], src[0], bmpInfo.biWidth * sizeof(RGBTRIPLE)); // expand last raw
-}
-
-//MPI_Type comtiguous(w*sizeof RG)
