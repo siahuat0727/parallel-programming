@@ -1,6 +1,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#define RAW 3
+#define COL 4
+
 int **a;
 int **b;
 
@@ -20,34 +23,33 @@ int **alloc_int(int Y, int X )
 
 void expand_raws(int** dest, int** src)
 {
-    memcpy(dest[0], src[3-1], 3 * sizeof(int) ); // expand first raw
-    memcpy(dest[3+1], src[0], 3 * sizeof(int) ); // expand last raw
+    memcpy(dest[0], src[RAW-1], COL * sizeof(int) ); // expand first raw
+    memcpy(dest[RAW+1], src[0], COL * sizeof(int) ); // expand last raw
 }
 
 void expandInt()
 {
-    b = alloc_int(3 + 2, 3);
-    memcpy(b[1], a[0], sizeof( int ) * 3 * 3);
+    b = alloc_int(RAW + 2, COL);
+    memcpy(b[1], a[0], sizeof( int ) * RAW * COL);
     expand_raws(b, a);
 }
 
-void print_int(int** arr, int n){
-    for(int i = 0; i < n; ++i){
-        for(int j = 0; j < 3; ++j)
-            printf("%d ", arr[i][j]);
+void print_int(int** arr, int raw, int col){
+    for(int i = 0; i < raw; ++i){
+        for(int j = 0; j < col; ++j)
+            printf("%2d ", arr[i][j]);
         putchar('\n');
     }
     putchar('\n');
 }
 
 int main(){
-    a = alloc_int(3, 3);
-    for(int i = 0; i < 3; ++i)
-        for(int j = 0; j < 3; ++j)
-            a[i][j] = 3*i + j;
-    print_int(a, 3);
+    a = alloc_int(RAW, COL);
+    for(int i = 0; i < RAW; ++i)
+        for(int j = 0; j < COL; ++j)
+            a[i][j] = COL*i + j;
+    print_int(a, RAW, COL);
     expandInt();
-    print_int(a, 3);
-    print_int(b, 5);
+    print_int(b, RAW+2, COL);
 }
 
