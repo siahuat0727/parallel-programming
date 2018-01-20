@@ -1,0 +1,7 @@
+1. __apple
+2. apPle  
+3.   appLE
+4. APPLE
+5. grape
+6.  GRAPE
+7.  Apple appLe
