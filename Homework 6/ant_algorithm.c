@@ -5,10 +5,19 @@
 #include <math.h>
 #include <assert.h>
 #include <sys/time.h>
+#include <mpi.h>
+
 #define MAX_CITY 50
 #define MAX_ANT 5000
 #define PATH_LENGTH 20
+#define INF 0x3f3f3f3f
 
+#define PRINT // delete if don't want to show process
+
+struct data{
+	int shortest_path_length;
+	int rank;
+};
 
 void open_file(FILE **fp, const char* path)
 {
@@ -25,12 +34,6 @@ void to_lower(char *str){
 			*str |= 1 << 5;
 		++str;
 	}
-}
-
-unsigned int get_time(){
-	struct timeval tv;
-	gettimeofday(&tv, NULL);
-	return tv.tv_sec*1000 + tv.tv_usec/1000;
 }
 
 void read_distance_table(int num_city, int dis[][MAX_CITY], const char* file_name, FILE *city_fp){
@@ -53,23 +56,32 @@ void init_pheromone(double pheromone[][MAX_CITY], int num_city)
 			pheromone[i][j] = 1e-8;
 }
 
-int main(){
+int main(int argc, char *argv[]){
+	MPI_Init(&argc, &argv);
+
+	int rank, size;
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+	// parameter that can be adjust
 	double evap_rate = 0.3;
 	double alpha = 1;
 	double beta = 1;
 	int Q = 10;
-	int num_ant = 1000;
-	int dis[MAX_CITY][MAX_CITY];
+	int num_ant = 500;
+	int num_thread = 8;
+	int num_simulate = 50;
 	int exchange_cycle = 10;
 
-	char ques_file[PATH_LENGTH] = "Readme.txt";
+	int dis[MAX_CITY][MAX_CITY];
+
+	char ques_file[PATH_LENGTH] = "ques.txt";
 	FILE *fp;
 	open_file(&fp, ques_file);
 	char file_name[PATH_LENGTH];
 	int num_city;
 	int minimal_tour;
 	while(fscanf(fp, "%s is a set of %d cities, from TSPLIB. The minimal tour has length %d.", file_name, &num_city, &minimal_tour) == 3){
-		int shortest_path_length = 0x3f3f3f3f;
 		int shortest_path[MAX_CITY+1];
 		to_lower(file_name);
 		strcat(file_name, "_d.txt");
@@ -77,11 +89,15 @@ int main(){
 		open_file(&city_fp, file_name);
 
 		read_distance_table(num_city, dis, file_name, city_fp);
+		struct data global_data = {.shortest_path_length = INF};
+		struct data local_process= {.rank = rank, .shortest_path_length = INF};
 
-#pragma omp parallel num_threads(8)\
+#pragma omp parallel num_threads(num_thread)\
 		default(none)\
-		shared(shortest_path, shortest_path_length, alpha, beta, num_city, num_ant, evap_rate, Q, dis, minimal_tour, exchange_cycle, stdout)
+		shared(shortest_path, alpha, beta, num_city, num_ant, evap_rate, Q, dis, minimal_tour, exchange_cycle, local_process, rank, num_simulate)
 		{
+			int thread_num = omp_get_thread_num();
+			srand(rank * num_thread + thread_num); // set difference seed for thread and reproducible
 			double pheromone[MAX_CITY][MAX_CITY];
 			memset(pheromone, 0, sizeof(pheromone));
 			init_pheromone(pheromone, num_city);
@@ -89,11 +105,10 @@ int main(){
 			bool visited[MAX_ANT][MAX_CITY];
 			int path_length[MAX_ANT];
 			int path[MAX_ANT][MAX_CITY+1];
-			int local_shortest_path_length = 0x3f3f3f3f;
-			int local_shortest_path[MAX_CITY+1];
+			int thread_shortest_path_length = INF;
+			int thread_shortest_path[MAX_CITY+1];
 
-			for(int nc = 0; nc < 400; ++nc){
-				int thread_num = omp_get_thread_num();
+			for(int nc = 0; nc < num_simulate; ++nc){
 				// init
 				memset(visited, false, sizeof(visited));
 				memset(delta, 0, sizeof(delta));
@@ -116,54 +131,50 @@ int main(){
 						for(int i = 0; i < num_city; ++i){
 							if(visited[k][i] == true || dis[cur_city][i] == 0)
 								prob[i] = 0;
-							else{
+							else
 								prob[i] = pow(pheromone[cur_city][i], alpha) * pow(1/(double)dis[cur_city][i], beta);
-							}
 							total_prob += prob[i];
 						}
 						// generate random double between 0 and total_prob
 						double random = (double)rand()/RAND_MAX * total_prob;
 						// choose next city base on possibility
-						int next_city = -1;
-						for(int i = 0; i < num_city; ++i){
-							if(visited[k][i] == true)
+						int next_city;
+						for(next_city = 0; next_city < num_city; ++next_city){
+							if(visited[k][next_city] == true)
 								continue;
-							random -= prob[i];
-							if (random <= 1e-7){
-								next_city = i;
+							random -= prob[next_city];
+							if (random <= 1e-7)
 								break;
-							}
 						}
 						if(n == num_city-1)
 							next_city = path[k][0];
-						assert(next_city != -1);
+						assert(next_city != num_city);
 						path_length[k] += dis[cur_city][next_city];
 						path[k][n+1] = next_city;
 						visited[k][next_city] = true;
 					}
 				}
 				for(int k = 0; k < num_ant; ++k){
-					if(path_length[k] < local_shortest_path_length){
-						local_shortest_path_length = path_length[k];
-						memcpy(local_shortest_path, path[k], (num_city+1)*sizeof(local_shortest_path[0]));
+					if(path_length[k] < thread_shortest_path_length){
+						thread_shortest_path_length = path_length[k];
+						memcpy(thread_shortest_path, path[k], (num_city+1)*sizeof(thread_shortest_path[0]));
 					}	
 				}
 
 				if(nc % exchange_cycle == 0){
-					//printf("na = %d local = %d global = %d\n", nc, local_shortest_path_length, shortest_path_length);
-					if(local_shortest_path_length < shortest_path_length){
-						//puts("bla");
+					if(thread_shortest_path_length < local_process.shortest_path_length){
 #pragma omp critical
-						if(local_shortest_path_length < shortest_path_length){
-							shortest_path_length = local_shortest_path_length;
-							memcpy(shortest_path, local_shortest_path, (num_city+1) * sizeof(shortest_path[0]));
+						if(thread_shortest_path_length < local_process.shortest_path_length){
+							local_process.shortest_path_length = thread_shortest_path_length;
+							memcpy(shortest_path, thread_shortest_path, (num_city+1) * sizeof(shortest_path[0]));
 						}
-						printf("shorter path length = %d\n", shortest_path_length);
-						fflush(stdout);
+#ifdef PRINT
+						printf("%d :shorter path length = %d\n", rank, local_process.shortest_path_length);
+#endif
 					}
-#pragma omp barrier
-					local_shortest_path_length = shortest_path_length;
-					memcpy(local_shortest_path, shortest_path, (num_city+1) * sizeof(shortest_path[0]));
+					//#pragma omp barrier
+					thread_shortest_path_length = local_process.shortest_path_length;
+					memcpy(thread_shortest_path, shortest_path, (num_city+1) * sizeof(shortest_path[0]));
 				}
 				// calculate new pheromone
 				for (int k = 0; k < num_ant; ++k){
@@ -188,14 +199,31 @@ int main(){
 						pheromone[i][j] = (1 - evap_rate)*pheromone[i][j] + delta[i][j];
 					}
 				}
-				if(shortest_path_length == minimal_tour)
+				if(local_process.shortest_path_length == minimal_tour)
 					break;
 			}
 		}
-		// print result
-		printf("found shortest path length = %d\n", shortest_path_length);
-		for(int i = 0; i <= num_city; ++i)
-			printf("%s%d", i ? " -> " : "", shortest_path[i]);
-		puts("");
+		MPI_Barrier(MPI_COMM_WORLD);
+		// see who found shortest path
+		MPI_Allreduce(&local_process, &global_data, 1, MPI_2INT, MPI_MINLOC, MPI_COMM_WORLD);
+		// send result to process 0
+		if(global_data.rank != 0){
+			if(rank == global_data.rank)
+				MPI_Send(shortest_path, num_city+1, MPI_INT, 0, 0, MPI_COMM_WORLD);
+			if(rank == 0)
+				MPI_Recv(shortest_path, num_city+1, MPI_INT, global_data.rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+		}
+		// process 0 print result
+		if(rank == 0){
+			printf("file: %s\n", file_name);
+			printf("found short path length = %d\n", global_data.shortest_path_length);
+			for(int i = 0; i <= num_city; ++i)
+				printf("%s%d", i ? " -> " : "", shortest_path[i]);
+			puts("\n");
+		}
 	}
+
+	MPI_Barrier(MPI_COMM_WORLD);
+	MPI_Finalize();
+	return 0;
 }
